@@ -4,7 +4,7 @@
 
 [Xirui Li](https://github.com/lixirui142), [Chao Ma](https://vision.sjtu.edu.cn/), [Xiaokang Yang](https://english.seiee.sjtu.edu.cn/english/detail/842_802.htm), and [Ming-Hsuan Yang](https://faculty.ucmerced.edu/mhyang/)<br>
 
-[**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Video Summary**](https://youtu.be/MgkVFEt3fCk)
+[**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Summary Video**](https://youtu.be/cZPtwcRepNY)
 
 https://github.com/lixirui142/VidToMe/assets/46120552/d44b086f-e566-41c6-a83a-c154a68a3307
 
