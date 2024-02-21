@@ -19,7 +19,7 @@ def compute_merge(module: torch.nn.Module, x: torch.Tensor, tome_info: Dict[str,
     generator = module.generator
 
     # Frame Number and Token Number
-    fsize = x.shape[0] // args["batch_size"]
+    fsize = args["chunk_size"]
     tsize = x.shape[1]
 
     # Merge tokens in high resolution layers
@@ -33,8 +33,8 @@ def compute_merge(module: torch.nn.Module, x: torch.Tensor, tome_info: Dict[str,
         unm = 0
         curF = fsize
 
-        # Recursive merge multi-frame tokens into one set. Such as 4->1 for 4 frames and 8->2->1 for 8 frames when max merge distance is 4.
-        while curF > args["merge_to"]:
+        # Recursive merge multi-frame tokens into one set. Such as 4->1 for 4 frames and 8->2->1 for 8 frames when target stride is 4.
+        while curF > 1:
             m, u, ret_dict = merge.bipartite_soft_matching_randframe(
                 local_tokens, curF, args["local_merge_ratio"], unm, generator, args["target_stride"], args["align_batch"])
             unm += ret_dict["unm_num"]
@@ -224,38 +224,43 @@ def hook_tome_module(module: torch.nn.Module):
 
 def apply_patch(
         model: torch.nn.Module,
+        local_merge_ratio: float = 0.9,
+        merge_global: bool = False,
+        global_merge_ratio=0.8,
         max_downsample: int = 2,
         seed: int = 123,
-        merge_to: int = 1,
-        batch_size: int = 2,
+        chunk_size: int = 4,
         include_control: bool = True,
         align_batch: bool = False,
-        merge_global: bool = False,
-        local_merge_ratio: float = 0.9,
         target_stride: int = 4,
-        global_merge_ratio=0.8,
         global_rand=0.5):
     """
-    Patches a stable diffusion model with ToMe.
+    Patches a stable diffusion model with VidToMe.
     Apply this to the highest level stable diffusion object (i.e., it should have a .model.diffusion_model).
 
     Important Args:
      - model: A top level Stable Diffusion module to patch in place. Should have a ".model.diffusion_model"
-     - ratio: The ratio of tokens to merge. I.e., 0.4 would reduce the total number of tokens by 40%.
-              The maximum value for this is 1-(1/(sx*sy)). By default, the max is 0.75 (I recommend <= 0.5 though).
-              Higher values result in more speed-up, but with more visual quality loss.
+     - local_merge_ratio: The ratio of tokens to merge locally. I.e., 0.9 would merge 90% src tokens.
+              If there are 4 frames in a chunk (3 src, 1 dst), the compression ratio will be 1.3 / 4.0.
+              And the largest compression ratio is 0.25 (when local_merge_ratio = 1.0).
+              Higher values result in more consistency, but with more visual quality loss.
+     - merge_global: Whether or not to include global token merging.
+     - global_merge_ratio: The ratio of tokens to merge locally. I.e., 0.8 would merge 80% src tokens.
+                           When find significant degradation in video quality. Try to lower the value.
 
     Args to tinker with if you want:
-     - max_downsample [1, 2, 4, or 8]: Apply ToMe to layers with at most this amount of downsampling.
+     - max_downsample [1, 2, 4, or 8]: Apply VidToMe to layers with at most this amount of downsampling.
                                        E.g., 1 only applies to layers with no downsampling (4/15) while
                                        8 applies to all layers (15/15). I recommend a value of 1 or 2.
-     - sx, sy: The stride for computing dst sets (see paper). A higher stride means you can merge more tokens,
-               but the default of (2, 2) works well in most cases. Doesn't have to divide image size.
-     - use_rand: Whether or not to allow random perturbations when computing dst sets (see paper). Usually
-                 you'd want to leave this on, but if you're having weird artifacts try turning this off.
-     - merge_attn: Whether or not to merge tokens for attention (recommended).
-     - merge_crossattn: Whether or not to merge tokens for cross attention (not recommended).
-     - merge_mlp: Whether or not to merge tokens for the mlp layers (very not recommended).
+     - seed: Manual random seed. 
+     - batch_size: Video chunk size.
+     - include_control: Whether or not to patch ControlNet model.
+     - align_batch: Whether or not to align similarity matching maps of samples in the batch. It should
+                    be True when using PnP as control.
+     - target_stride: Stride between target frames. I.e., when target_stride = 4, there is 1 target frame
+                      in any 4 consecutive frames. 
+     - global_rand: Probability in global token merging src/dst split. Global tokens are always src when
+                    global_rand = 1.0 and always dst when global_rand = 0.0 .
     """
 
     # Make sure the module is not currently patched
@@ -287,8 +292,7 @@ def apply_patch(
                 "max_downsample": max_downsample,
                 "generator": None,
                 "seed": seed,
-                "merge_to": merge_to,
-                "batch_size": batch_size,
+                "chunk_size": chunk_size,
                 "align_batch": align_batch,
                 "merge_global": merge_global,
                 "global_merge_ratio": global_merge_ratio,

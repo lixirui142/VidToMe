@@ -11,6 +11,8 @@ import torchvision.transforms as T
 
 from diffusers import DDIMScheduler, StableDiffusionControlNetPipeline, StableDiffusionPipeline, StableDiffusionDepth2ImgPipeline, ControlNetModel
 
+from controlnet_utils import control_preprocess
+
 CONTROLNET_DICT = {
     "tile": "lllyasviel/control_v11f1e_sd15_tile",
     "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
@@ -52,7 +54,7 @@ def init_model(device = "cuda", sd_version = "1.5", model_key = None, control_ty
     else:
         weight_dtype = torch.float32
 
-    if control_type != "none":
+    if control_type not in ["none", "pnp"]:
         controlnet_key = CONTROLNET_DICT[control_type]
         print(f'[INFO] loading controlnet from: {controlnet_key}')
         controlnet = ControlNetModel.from_pretrained(
@@ -121,7 +123,7 @@ def glob_frame_paths(video_path):
     frame_paths = sorted(frame_paths)
     return frame_paths
 
-def load_video(video_path, h, w, n_frames = -1, device = "cuda"):
+def load_video(video_path, h, w, frame_ids = None, device = "cuda"):
     print(f"[INFO] loading video from: {video_path}")    
 
     if ".mp4" in video_path:
@@ -140,13 +142,11 @@ def load_video(video_path, h, w, n_frames = -1, device = "cuda"):
             frame = load_image(frame_path)
             frame_ls.append(frame)
         frames = torch.cat(frame_ls)
-    frame_ids = [i for i in range(len(frames))]
-    if n_frames > 0:
-        print(f"[INFO] keep first {n_frames} frames")
-        frames = frames[:n_frames]
-        frame_ids = frame_ids[:n_frames]
+    if frame_ids is not None:
+        frames = frames[frame_ids]
+
     frames = process_frames(frames, h, w)
-    return frames.to(device), frame_ids
+    return frames.to(device)
 
 def save_frames(frames, path, ext = "png", frame_ids = None):
     if frame_ids is None:
@@ -154,6 +154,31 @@ def save_frames(frames, path, ext = "png", frame_ids = None):
     for i, frame in zip(frame_ids, frames):
         T.ToPILImage()(frame).save(
             os.path.join(path, '{:04}.{}'.format(i, ext)))
+
+def load_latent(latent_path, t, frame_ids = None):
+    latent_fname = f'noisy_latents_{t}.pt'
+    
+    lp = os.path.join(latent_path, latent_fname)
+    assert os.path.exists(lp), f"Latent at timestep {t} not found in {latent_path}."
+        
+    latents = torch.load(lp)
+    if frame_ids is not None:
+        latents = latents[frame_ids]
+
+    return latents
+
+@torch.no_grad()
+def prepare_depth(pipe, frames, frame_ids, work_dir):
+    print("[INFO] preparing depth images...")
+    depth_ls = []
+    depth_dir = os.path.join(work_dir, "depth")
+    os.makedirs(os.path.dirname(depth_path), exist_ok=True)
+    for frame, frame_id in zip(frames, frame_ids):
+        depth_path = os.path.join(depth_dir, "{:04}.pt".format(frame_id))
+        depth = load_depth(pipe, depth_path, frame)
+        depth_ls += [depth]
+    
+    return torch.cat(depth_ls)
 
 # From pix2video: code/file_utils.py
 def load_depth(model, depth_path, input_image, dtype = torch.float32):
@@ -244,3 +269,45 @@ def get_controlnet_kwargs(controlnet, x, cond, t, controlnet_cond, controlnet_sc
     mid_block_res_sample *= controlnet_scale
     controlnet_kwargs = {"down_block_additional_residuals": down_block_res_samples, "mid_block_additional_residual": mid_block_res_sample}
     return controlnet_kwargs
+
+def get_frame_ids(frame_range, frame_ids = None):
+    if frame_ids is None:
+        frame_ids = list(range(*frame_range))
+    frame_ids = sorted(frame_ids)
+
+    if len(frame_ids) > 4:
+        frame_ids_str = " ".join(frame_ids[:2]) + " ... " + " ".join(frame_ids[-2:])
+    else:
+        frame_ids_str = " ".join(frame_ids)
+    print("[INFO] Frame indexes: ",frame_ids_str)
+    return frame_ids
+
+def prepare_control(control, frames, frame_ids, save_path):
+    if control in ["none", "pnp"]:
+        return None
+
+    control_subdir = f'{save_path}/{control}_image'
+
+    preprocess_flag = True
+    if os.path.exists(control_subdir):
+        print(f"Load control image from {control_subdir}.")
+        control_image_ls = []
+        for frame_id in frame_ids:
+            image_path = os.path.join(control_subdir, "{:04}.pt".format(frame_id))
+            if not os.path.exists(image_path):
+                break
+            control_image_ls += [load_image(image_path)]
+        else:
+            preprocess_flag = False
+            control_images = torch.cat(control_image_ls)
+
+    if preprocess_flag:
+        print("[INFO] Preprocessing control images...")
+        control_images = control_preprocess(frames, control)
+        print(f"[INFO] Save control images to {control_subdir}.")
+        os.makedirs(control_subdir, exist_ok = True)
+        for image, frame_id in zip(control_images, frame_ids):
+            image_path = os.path.join(control_subdir, "{:04}.pt".format(frame_id))
+            T.ToPILImage(image).save(image_path)
+
+    return control_images

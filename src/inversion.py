@@ -4,9 +4,8 @@ import torch
 from tqdm import tqdm
 import os
 from transformers import logging
-from controlnet_utils import control_preprocess
-from config import load_config
-from utils import get_controlnet_kwargs, get_latents_dir, init_model, load_video, save_frames, seed_everything, load_depth
+from utils import load_config
+from utils import get_controlnet_kwargs, get_frame_ids, get_latents_dir, init_model, load_video, prepare_depth, save_frames, seed_everything, load_depth, control_preprocess
 import vidtome
 # suppress partial model loading warning
 logging.set_verbosity_error()
@@ -25,7 +24,7 @@ class Inversion(nn.Module):
             print("No mixed precision. Use torch.float32.")
 
         self.use_depth = config.sd_version == "depth"
-        self.model_key = model_key
+        self.model_key = config.model_key
 
         inv_config = config.inversion
 
@@ -206,19 +205,6 @@ class Inversion(nn.Module):
         return x
 
     @torch.no_grad()
-    def prepare_depth(self, frames, frame_ids):
-        print("[INFO] preparing depth images...")
-        depth_ls = []
-        depth_dir = os.path.join(self.work_dir, "depth")
-        os.makedirs(os.path.dirname(depth_path), exist_ok=True)
-        for frame, frame_id in zip(frames, frame_ids):
-            depth_path = os.path.join(depth_dir, "{:04}.pt".format(frame_id))
-            depth = load_depth(self.pipe, depth_path, frame)
-            depth_ls += [depth]
-        
-        return torch.cat(depth_ls)
-
-    @torch.no_grad()
     def prepare_cond(self, prompts, n_frames):
         if isinstance(prompts, str):
             prompts = [prompts] * n_frames
@@ -252,11 +238,11 @@ class Inversion(nn.Module):
         if self.check_latent_exists(save_path) and not self.force:
             print(f"[INFO] inverted latents exist at: {save_path}. Skip inversion! Set 'inversion.force: True' to invert again. ")
             return
-
-        frames, frame_ids = load_video(data_path, self.frame_height, self.frame_width, n_frames = self.n_frames, device = self.device)
+        frame_ids = get_frame_ids([self.n_frames])
+        frames, frame_ids = load_video(data_path, self.frame_height, self.frame_width, frame_ids = frame_ids, device = self.device)
 
         if self.use_depth:
-            self.depths = self.prepare_depth(frames, frame_ids)
+            self.depths = prepare_depth(self.pipe, frames, frame_ids, self.work_dr)
         conds, prompts = self.prepare_cond(self.prompt, len(frames))
         with open(os.path.join(save_path, 'inversion_prompts.txt'), 'w') as f:
             f.write('\n'.join(prompts))
