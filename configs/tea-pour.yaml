@@ -1,0 +1,24 @@
+sd_version: "1.5" # In ['2.1', '2.0', '1.5', 'depth']
+input_path: "data/tea-pour.mp4" # Accept .mp4, .gif file or a folder with png/jpg sequence
+work_dir: "outputs/tea-pour"
+
+height: 512
+width: 512
+
+inversion:
+  prompt: "a tea pot pouring tea into a cup."
+
+generation:
+  control: "depth"
+  control_scale: 1.0
+  prompt:
+    vector: "vector illustration of a tea pot pouring tea into a cup."
+
+  # VidToMe args. See details in "src/vidtome/patch.py, apply_patch()"
+  local_merge_ratio: 0.95
+  global_merge_ratio: 0.9
+  global_rand: 0.1
+
+  frame_range: [64]
+
+base_config: configs/default.yaml

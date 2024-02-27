@@ -1,0 +1,40 @@
+sd_version: "2.1" # In ['2.1', '2.0', '1.5', 'depth']
+input_path: "data/dog.mp4" # Accept .mp4, .gif file or a folder with png/jpg sequence
+work_dir: "outputs/dog"
+
+height: 512
+width: 512
+
+inversion:
+  save_path: "${work_dir}/latents"
+  prompt: "a dog walking on the ground near a bush."
+  steps: 50
+  save_intermediate: True # Save intermediate latents. Required when using PnP.
+  save_steps: 50
+  n_frames: 32
+
+generation:
+  control: "pnp"
+
+  guidance_scale: 7.5 # CFG scale
+  n_timesteps: 50
+  negative_prompt: "ugly, blurry, low res"
+  prompt:
+    VG: "a dog walking on the ground near a bush, Van Gogh style."
+    desert: "a dog walking in the desert near a bush."
+
+
+  latents_path: "${work_dir}/latents"
+  output_path: "${work_dir}"
+
+  # VidToMe args. See details in "src/vidtome/patch.py, apply_patch()"
+  local_merge_ratio: 0.9
+  global_merge_ratio: 0.8
+  global_rand: 0.5
+  
+seed: 123
+device: "cuda"
+base_config: "configs/default.yaml" # Use default values in template.yaml
+
+float_precision: "fp16"
+enable_xformers_memory_efficient_attention: True

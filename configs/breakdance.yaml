@@ -1,0 +1,36 @@
+sd_version: "1.5" # In ['2.1', '2.0', '1.5', 'depth']
+input_path: "data/breakdance.mp4" # Accept .mp4, .gif file or a folder with png/jpg sequence
+work_dir: "outputs/breakdance"
+
+height: 512
+width: 512
+
+inversion:
+  save_path: "${work_dir}/latents"
+  prompt: "a man doing a trick on the ground in front of a crowd."
+  save_intermediate: False # Save intermediate latents. Required when using PnP.
+  force: True
+
+generation:
+  control: "softedge"
+  control_scale: 0.4
+  prompt:
+    pixelart: "a man doing a trick on the ground in front of a crowd, pixel art, PixArFK."
+
+  latents_path: "${work_dir}/latents"
+  output_path: "${work_dir}"
+
+  # VidToMe args. See details in "src/vidtome/patch.py, apply_patch()"
+  local_merge_ratio: 0.9
+  global_merge_ratio: 0.6
+  global_rand: 0.5
+
+  #LoRA configs:
+  use_lora: True
+  lora:
+    pretrained_model_name_or_path_or_dict: "artificialguybr/pixelartredmond-1-5v-pixel-art-loras-for-sd-1-5"
+    weight_name: "PixelArtRedmond15V-PixelArt-PIXARFK.safetensors"
+    adapter_name: "pixel"
+    adapter_weights: 1.0
+  
+base_config: configs/default.yaml

@@ -1,0 +1,77 @@
+sd_version: "1.5" # In ['2.1', '2.0', '1.5', 'depth']
+model_key: null # Specify model key. If set, ignore sd_version.
+input_path: "path/to/video" # Accept .mp4, .gif file or a folder with png/jpg sequence
+work_dir: "workdir"
+
+height: 512
+width: 512
+
+inversion:
+  save_path: "${work_dir}/latents"
+  prompt: "xxxx"
+  n_frames: null # null for inverting all frames
+  steps: 50 # Inversion steps
+  save_intermediate: False # Save intermediate latents. Required when using PnP.
+  save_steps: 50
+  use_blip: False # Use prompt created by BLIP.
+  recon: False # Reconstruct the input video from inverted latents.
+  control: "none" # Apply ControlNet in inversion. Choices ['tile', 'softedge', 'depth', 'canny', 'none']
+  control_scale: 1.0
+  batch_size: 8
+  force: False # Force run inversion even inverted latents have been found
+  # float_precision: "fp32" # "fp16" or "fp32"
+
+generation:
+  control: "pnp" # Apply which control in generation. 
+  # Choices:
+  # 'pnp' (Plug-and-Play), args:
+  pnp_attn_t: 0.5
+  pnp_f_t: 0.8
+
+  # ['tile', 'softedge', 'depth', 'canny'] (Controlnet), args:
+  control_scale: 1.0
+  
+  # 'none' (No control when using sd2-depth model)
+
+  # Sample args:
+  guidance_scale: 7.5 # CFG scale
+  n_timesteps: 50
+  negative_prompt: "ugly, blurry, low res"
+  prompt: null
+    # style: "xxx"
+    # object: "xxx"
+    # background: "xxx"
+
+  latents_path: "${work_dir}/latents"
+  output_path: "${work_dir}"
+
+  chunk_size: 4 # Number of frames in a video chunk
+  chunk_ord: "mix-4" # Process video chunks in which order. From ['seq', 'rand', 'mix-#'].
+
+  # VidToMe args. See details in "src/vidtome/patch.py, apply_patch()"
+  local_merge_ratio: 0.9
+  merge_global: True
+  global_merge_ratio: 0.8
+  global_rand: 0.5
+  align_batch: True
+
+  frame_range: [0, 32, 1] # start, end, interval. == [0, 32] == [32]
+  frame_ids: null # Specify frame indexes to edit. It will override frame_range.
+  save_frame: True
+
+  # LoRA configs
+  use_lora: False
+  # If use LoRA, add parameters below such as:
+  # lora:
+  #   pretrained_model_name_or_path_or_dict: null
+  #   lora_weight_name: null
+  #   lora_adapter: null
+  #   lora_weight: 1.0
+
+
+
+seed: 123
+device: "cuda"
+# base_config: "configs/default.yaml" # Set a base config file here
+float_precision: "fp16" # "fp16" or "fp32"
+enable_xformers_memory_efficient_attention: True

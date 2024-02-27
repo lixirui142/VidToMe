@@ -1,7 +1,6 @@
-*.png
+
 *.pt
 PNP-results/
-data/
 latents_forward/
 **/__pycache__
 cross_attn_map/
@@ -9,10 +8,9 @@ latents*/
 *.avi
 *.bin
 tmp/
-*.mp4
 *.zip
 *.gif
-*.yaml
+
 *.json
 *.csv
 *.safetensors

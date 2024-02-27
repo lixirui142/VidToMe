@@ -1,0 +1,23 @@
+sd_version: "depth" # In ['2.1', '2.0', '1.5', 'depth']
+input_path: "data/flamingo.mp4" # Accept .mp4, .gif file or a folder with png/jpg sequence
+work_dir: "outputs/flamingo"
+
+height: 512
+width: 512
+
+inversion:
+  prompt: "flamingos standing in the water near a tree."
+
+generation:
+  control: "none"
+  negative_prompt: ""
+  prompt:
+    origami: "rainbow-colored origami flamingos standing in the water near a tree."
+
+  chunk_ord: "rand"
+  # VidToMe args. See details in "src/vidtome/patch.py, apply_patch()"
+  local_merge_ratio: 0.9
+  global_merge_ratio: 0.9
+
+seed: 142857
+base_config: configs/default.yaml
