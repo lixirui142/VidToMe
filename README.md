@@ -12,7 +12,7 @@ https://github.com/lixirui142/VidToMe/assets/46120552/d44b086f-e566-41c6-a83a-c1
 </details>
 
 ## Updates
-- [02/2023] Code is released.
+- [02/2024] Code is released.
 - [02/2024] Accepted to CVPR 2024!
 - [12/2023] Release paper and website.
 
@@ -54,7 +54,7 @@ If you find this work useful for your research, please consider citing our paper
 
 ```bibtex
 
-@inproceedings{li2023vidtome,
+@inproceedings{li2024vidtome,
     title={VidToMe: Video Token Merging for Zero-Shot Video Editing},
     author={Li, Xirui and Ma, Chao and Yang, Xiaokang and Yang, Ming-Hsuan},
     booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
