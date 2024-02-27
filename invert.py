@@ -1,33 +1,35 @@
-import torchvision.transforms as T
 import torch.nn as nn
 import torch
 from tqdm import tqdm
 import os
 from transformers import logging
-from utils import load_config
-from utils import get_controlnet_kwargs, get_frame_ids, get_latents_dir, init_model, load_video, prepare_depth, save_frames, seed_everything, load_depth, control_preprocess
-import vidtome
+
+from utils import load_config, save_config
+from utils import get_controlnet_kwargs, get_latents_dir, init_model, seed_everything
+from utils import load_video, prepare_depth, save_frames, control_preprocess
+
 # suppress partial model loading warning
 logging.set_verbosity_error()
 
 
-class Inversion(nn.Module):
+class Inverter(nn.Module):
     def __init__(self, pipe, scheduler, config):
         super().__init__()
 
         self.device = config.device
-        if config.mixed_precision == "fp16":
-            self.dtype = torch.float16
-            print("Mixed precision fp16. Use torch.float16.")
-        else:
-            self.dtype = torch.float32
-            print("No mixed precision. Use torch.float32.")
-
         self.use_depth = config.sd_version == "depth"
         self.model_key = config.model_key
 
+        self.config = config
         inv_config = config.inversion
 
+        float_precision = inv_config.float_precision if "float_precision" in inv_config else config.float_precision
+        if float_precision == "fp16":
+            self.dtype = torch.float16
+            print("[INFO] float precision fp16. Use torch.float16.")
+        else:
+            self.dtype = torch.float32
+            print("[INFO] float precision fp32. Use torch.float32.")
 
         self.pipe = pipe
         self.vae = pipe.vae
@@ -59,6 +61,7 @@ class Inversion(nn.Module):
 
         self.n_frames = inv_config.n_frames
         self.frame_height, self.frame_width = config.height, config.width
+        self.work_dir = config.work_dir
 
 
     @torch.no_grad()
@@ -236,13 +239,18 @@ class Inversion(nn.Module):
         save_path = get_latents_dir(save_path, self.model_key)
         os.makedirs(save_path, exist_ok = True)
         if self.check_latent_exists(save_path) and not self.force:
-            print(f"[INFO] inverted latents exist at: {save_path}. Skip inversion! Set 'inversion.force: True' to invert again. ")
+            print(f"[INFO] inverted latents exist at: {save_path}. Skip inversion! Set 'inversion.force: True' to invert again.")
             return
-        frame_ids = get_frame_ids([self.n_frames])
-        frames, frame_ids = load_video(data_path, self.frame_height, self.frame_width, frame_ids = frame_ids, device = self.device)
+
+        frames = load_video(data_path, self.frame_height, self.frame_width, device = self.device)
+
+        frame_ids = list(range(len(frames)))
+        if self.n_frames is not None:
+            frame_ids = frame_ids[:self.n_frames]
+        frames = frames[frame_ids]
 
         if self.use_depth:
-            self.depths = prepare_depth(self.pipe, frames, frame_ids, self.work_dr)
+            self.depths = prepare_depth(self.pipe, frames, frame_ids, self.work_dir)
         conds, prompts = self.prepare_cond(self.prompt, len(frames))
         with open(os.path.join(save_path, 'inversion_prompts.txt'), 'w') as f:
             f.write('\n'.join(prompts))
@@ -257,7 +265,7 @@ class Inversion(nn.Module):
         print(f"[INFO] clean latents shape: {latents.shape}")
 
         inverted_x = self.ddim_inversion(latents, conds, save_path)
-
+        save_config(self.config, save_path, inv = True)
         if self.recon:
             latent_reconstruction = self.ddim_sample(inverted_x, conds)
 
@@ -266,16 +274,13 @@ class Inversion(nn.Module):
                 latent_reconstruction)
 
             recon_save_path = os.path.join(save_path, 'recon_frames')
-            os.makedirs(recon_save_path, exist_ok=True)
             save_frames(recon_frames, recon_save_path, frame_ids = frame_ids)
-
-        return
 
 if __name__ == "__main__":
     config = load_config()
     pipe, scheduler, model_key = init_model(
-        config.device, config.sd_version, config.model_key, config.inversion.control, config.weight_dtype)
+        config.device, config.sd_version, config.model_key, config.inversion.control, config.float_precision)
     config.model_key = model_key
     seed_everything(config.seed)
-    inversion = Inversion(pipe, scheduler, config)
+    inversion = Inverter(pipe, scheduler, config)
     inversion(config.input_path, config.inversion.save_path)

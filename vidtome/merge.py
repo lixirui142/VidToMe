@@ -158,6 +158,187 @@ def bipartite_soft_matching_randframe(metric: torch.Tensor,
     ret_dict = {"unm_num": unm_idx.shape[1] if unm_idx.shape[1] is not None else 0}
     return merge, unmerge, ret_dict
 
+
+def bipartite_soft_matching_random2d_hier(metric: torch.Tensor, frame_num: int, ratio: float, unm_pre: int, generator: torch.Generator, target_stride: int = 4, adhere_src: bool = False,  merge_mode: str = "replace", scores = None, coord = None, rec_field = 2) -> Tuple[Callable, Callable]:
+    """
+    Partitions the tokens into src and dst and merges r tokens from src to dst.
+    Dst tokens are partitioned by choosing one randomy in each (sx, sy) region.
+
+    Args:
+     - metric [B, N, C]: metric to use for similarity
+     - w: image width in tokens
+     - h: image height in tokens
+     - sx: stride in the x dimension for dst, must divide w
+     - sy: stride in the y dimension for dst, must divide h
+     - r: number of tokens to remove (by merging)
+     - no_rand: if true, disable randomness (use top left corner only)
+     - rand_seed: if no_rand is false, and if not None, sets random seed.
+    """
+    B, N, _ = metric.shape
+    F = frame_num
+    nf = (N - unm_pre) // F
+
+    if ratio <= 0:
+        return do_nothing, do_nothing
+
+    gather = mps_gather_workaround if metric.device.type == "mps" else torch.gather
+    
+    with torch.no_grad():
+
+        
+        # The image might not divide sx and sy, so we need to work on a view of the top left if the idx buffer instead
+        idx_buffer = torch.arange(N - unm_pre, device=metric.device, dtype=torch.int64)
+
+
+        # randn = torch.randint(0, F, torch.Size([nf])).to(idx_buffer) * nf
+        # dst_indexes = torch.arange(nf, device=metric.device, dtype=torch.int64) + randn
+        # dst_select = torch.zeros_like(idx_buffer).to(torch.bool)
+        # dst_select[dst_indexes] = 1
+        max_f = min(target_stride, F)
+        randn = torch.randint(0, max_f, torch.Size([1]), generator=generator, device = generator.device)
+        # randn = 0
+        dst_select = ((torch.div(idx_buffer, nf, rounding_mode='floor')) % max_f == randn).to(torch.bool)
+        # dst_select = ((idx_buffer // nf) == 0).to(torch.bool)
+        a_idx = idx_buffer[None, ~dst_select, None] + unm_pre
+        b_idx = idx_buffer[None, dst_select, None] + unm_pre
+
+        unm_buffer = torch.arange(unm_pre, device=metric.device, dtype=torch.int64)[None,:,None]
+        b_idx = torch.cat([b_idx, unm_buffer], dim = 1)
+
+        # We set dst tokens to be -1 and src to be 0, so an argsort gives us dst|src indices
+
+        # We're finished with these
+        del idx_buffer, unm_buffer
+
+        num_dst = b_idx.shape[1]
+
+        def split(x):
+            b, n, c = x.shape
+            src = gather(x, dim=1, index=a_idx.expand(b, n - num_dst, c))
+            dst = gather(x, dim=1, index=b_idx.expand(b, num_dst, c))
+            return src, dst
+        
+        def split_coord(coord):
+            b, n, c = coord.shape
+            src = gather(coord, dim=1, index=a_idx.expand(b, n - num_dst, c))
+            dst = gather(coord, dim=1, index=b_idx.expand(b, num_dst, c))
+            return src, dst
+
+
+        # Cosine similarity between A and B
+        metric = metric / metric.norm(dim=-1, keepdim=True)
+        a, b = split(metric)
+        
+
+        if coord is not None:
+            src_coord, dst_coord = split_coord(coord)
+            mask = torch.norm(src_coord[:,:,None,:] - dst_coord[:,None,:,:], dim=-1) > rec_field
+            
+        
+        scores = a @ b.transpose(-1, -2)
+
+        if coord is not None:
+            scores[mask] = 0
+
+        # Can't reduce more than the # tokens in src
+        r = int(a.shape[1] * ratio)
+        r = min(a.shape[1], r)
+
+
+
+        if adhere_src:
+            # scores = torch.sum(scores, dim=0)
+            scores = torch.cat([*scores], dim = -1)
+            node_max, node_idx = scores.max(dim=-1)
+            edge_idx = node_max.argsort(dim=-1, descending=True)[..., None]
+
+            unm_idx = edge_idx[..., r:, :]  # Unmerged Tokens
+            src_idx = edge_idx[..., :r, :]  # Merged Tokens
+            dst_idx = gather(node_idx[..., None], dim=-2, index=src_idx) % num_dst
+
+            unm_idx = unm_idx.expand(B, -1, -1)
+            src_idx = src_idx.expand(B, -1, -1)
+            dst_idx = dst_idx.expand(B, -1, -1)
+        else:
+            # scores = torch.cat([*scores][1:], dim = -1)
+            # node_max, node_idx = scores.max(dim=-1)
+            # edge_idx = node_max.argsort(dim=-1, descending=True)[..., None]
+
+            # unm_idx = edge_idx[..., r:, :]  # Unmerged Tokens
+            # src_idx = edge_idx[..., :r, :]  # Merged Tokens
+            # dst_idx = gather(node_idx[..., None], dim=-2, index=src_idx) % num_dst
+
+            # unm_idx = unm_idx.expand(B, -1, -1)
+            # src_idx = src_idx.expand(B, -1, -1)
+            # dst_idx = dst_idx.expand(B, -1, -1)
+
+
+            # Find the most similar greedily
+            node_max, node_idx = scores.max(dim=-1)
+            edge_idx = node_max.argsort(dim=-1, descending=True)[..., None]
+
+            unm_idx = edge_idx[..., r:, :]  # Unmerged Tokens
+            src_idx = edge_idx[..., :r, :]  # Merged Tokens
+            dst_idx = gather(node_idx[..., None], dim=-2, index=src_idx)
+
+        # if adhere_src:
+        #     unm_idx[:,...] = unm_idx[0:1]
+        #     src_idx[:,...] = src_idx[0:1]
+        #     dst_idx[:,...] = dst_idx[0:1]
+
+    def merge(x: torch.Tensor, mode=None, b_select = None,  **kwarg) -> torch.Tensor:
+        src, dst = split(x)
+        n, t1, c = src.shape
+        if b_select is not None:
+            if not isinstance(b_select, list):
+                b_select = [b_select]
+            u_idx, s_idx, d_idx = unm_idx[b_select], src_idx[b_select], dst_idx[b_select]
+        else:
+            u_idx, s_idx, d_idx = unm_idx, src_idx, dst_idx
+        
+        unm = gather(src, dim=-2, index=u_idx.expand(-1, -1, c))
+        src = gather(src, dim=-2, index=s_idx.expand(-1, -1, c))
+        mode = mode if mode is not None else merge_mode
+        if mode != "replace":
+            dst = dst.scatter_reduce(-2, d_idx.expand(-1, -1, c), src, reduce=mode, include_self=True)
+        # dst = dst.scatter(-2, dst_idx.expand(n, r, c), src, reduce='add')
+        
+        # dst_cnt = torch.ones_like(dst)
+        # src_ones = torch.ones_like(src)
+        # dst_cnt = dst_cnt.scatter(-2, dst_idx.expand(n, r, c), src_ones, reduce='add')
+
+        # dst = dst / dst_cnt
+        # dst2 = dst.scatter_reduce(-2, dst_idx.expand(n, r, c), src, reduce=mode, include_self=True)
+        # assert torch.allclose(dst1, dst2)
+
+        return torch.cat([unm, dst], dim=1)
+
+    def unmerge(x: torch.Tensor, b_select = None, unm_modi = None,  **kwarg) -> torch.Tensor:
+        unm_len = unm_idx.shape[1]
+        unm, dst = x[..., :unm_len, :], x[..., unm_len:, :]
+        b, _, c = unm.shape
+        if b_select is not None:
+            if not isinstance(b_select, list):
+                b_select = [b_select]
+            u_idx, s_idx, d_idx = unm_idx[b_select], src_idx[b_select], dst_idx[b_select]
+        else:
+            u_idx, s_idx, d_idx = unm_idx, src_idx, dst_idx
+        if unm_modi is not None:
+            if unm_modi == "zero":
+                unm = torch.zeros_like(unm)
+        src = gather(dst, dim=-2, index=d_idx.expand(-1, -1, c))
+
+        # Combine back to the original shape
+        out = torch.zeros(b, N, c, device=x.device, dtype=x.dtype)
+        out.scatter_(dim=-2, index=b_idx.expand(b, -1, c), src=dst)
+        out.scatter_(dim=-2, index=gather(a_idx.expand(b, -1, 1), dim=1, index=u_idx).expand(-1, -1, c), src=unm)
+        out.scatter_(dim=-2, index=gather(a_idx.expand(b, -1, 1), dim=1, index=s_idx).expand(-1, -1, c), src=src)
+
+        return out
+
+    ret_dict = {"unm_num": unm_idx.shape[1]}
+    return merge, unmerge, ret_dict
+
 # For Global Token Merging.
 def bipartite_soft_matching_2s( metric: torch.Tensor, 
                                 src_len: int, ratio: float, align_batch: bool,

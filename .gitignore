@@ -17,4 +17,4 @@ tmp/
 *.csv
 *.safetensors
 outputs/
-_test*
+_*

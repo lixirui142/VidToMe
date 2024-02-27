@@ -14,35 +14,17 @@ import transformers
 import numpy as np
 from diffusers.utils import load_image
 
+CONTROLNET_DICT = {
+    "tile": "lllyasviel/control_v11f1e_sd15_tile",
+    "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
+    "openpose": "lllyasviel/control_v11p_sd15_openpose",
+    "softedge": "lllyasviel/control_v11p_sd15_softedge",
+    "depth": "lllyasviel/control_v11f1p_sd15_depth",
+    "lineart_anime": "lllyasviel/control_v11p_sd15s2_lineart_anime",
+    "canny": "lllyasviel/control_v11p_sd15_canny"
+}
 
 processor_cache = dict()
-
-def control_preprocess(images, control_type, **kwargs):
-    if control_type == "tile":
-        return tile_preprocess(images, **kwargs)
-    elif control_type == "ip2p":
-        return ip2p_prepreocess(images, **kwargs)
-    elif control_type == "openpose":
-        return openpose_prepreocess(images, **kwargs)
-    elif "softedge" in control_type:
-        return softedge_prepreocess(images, **kwargs)
-    elif "depth" in control_type:
-        return depth_prepreocess(images, **kwargs)
-    elif control_type == "lineart_anime":
-        return lineart_anime_prepreocess(images, **kwargs)
-    elif control_type == "canny":
-        return canny_preprocess(images, **kwargs)
-    elif control_type == "none":
-        return images
-
-
-def tile_preprocess(image, resample_rate = 1.0, **kwargs):
-    cond_image = F.interpolate(image, scale_factor=resample_rate, mode="bilinear")
-    cond_image = F.interpolate(cond_image, scale_factor=1 / resample_rate)
-    return cond_image
-    
-def ip2p_prepreocess(image, **kwargs):
-    return image
 
 def process(image, processor_id):
     process_ls = []
@@ -61,21 +43,23 @@ def process(image, processor_id):
     processed_image = torch.stack(process_ls)
     return processed_image
 
-def openpose_prepreocess(image, **kwargs):
+def tile_preprocess(image, resample_rate = 1.0, **kwargs):
+    cond_image = F.interpolate(image, scale_factor=resample_rate, mode="bilinear")
+    cond_image = F.interpolate(cond_image, scale_factor=1 / resample_rate)
+    return cond_image
     
-    processor_id = 'openpose'
+def ip2p_prepreocess(image, **kwargs):
+    return image
 
+def openpose_prepreocess(image, **kwargs):
+    processor_id = 'openpose'
     return process(image, processor_id)
 
 def softedge_prepreocess(image, proc = "pidsafe", **kwargs):
-
-    # processor_id = 'softedge_hed'
     processor_id = f'softedge_{proc}'
-
     return process(image, processor_id)
 
 def depth_prepreocess(image, **kwargs):
-    
     image_ls = []
     for img in image:
         image_ls.append(T.ToPILImage()(img))
@@ -84,22 +68,30 @@ def depth_prepreocess(image, **kwargs):
     depth_ls = []
     for r in ret:
         depth_ls.append(T.ToTensor()(r['depth']))
-
     depth = torch.cat(depth_ls)
     depth = torch.stack([depth, depth, depth], axis=1)
     return depth
 
 def lineart_anime_prepreocess(image, proc = "anime",**kwargs):
-    
     processor_id = f'lineart_{proc}'
-
     return process(image, processor_id)
 
 def canny_preprocess(image, **kwargs):
-    
     processor_id = f'canny'
-
     return process(image, processor_id)
+
+PREPROCESS_DICT = {
+    "tile": tile_preprocess,
+    "ip2p": ip2p_prepreocess,
+    "openpose": openpose_prepreocess,
+    "softedge": softedge_prepreocess,
+    "depth": depth_prepreocess,
+    "lineart_anime": lineart_anime_prepreocess,
+    "canny": canny_preprocess
+}
+
+def control_preprocess(images, control_type, **kwargs):
+    return PREPROCESS_DICT[control_type](images, **kwargs)
 
 def empty_cache():
     global processor_cache

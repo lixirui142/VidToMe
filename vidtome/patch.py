@@ -1,4 +1,5 @@
 import math
+import time
 from typing import Type, Dict, Any, Tuple, Callable
 
 import numpy as np
@@ -19,11 +20,17 @@ def compute_merge(module: torch.nn.Module, x: torch.Tensor, tome_info: Dict[str,
     generator = module.generator
 
     # Frame Number and Token Number
-    fsize = args["chunk_size"]
+    fsize = x.shape[0] // args["batch_size"]
     tsize = x.shape[1]
 
     # Merge tokens in high resolution layers
     if downsample <= args["max_downsample"]:
+
+        if args["generator"] is None:
+            args["generator"] = init_generator(x.device)
+            # module.generator = module.generator.manual_seed(123)
+        elif args["generator"].device != x.device:
+            args["generator"] = init_generator(x.device, fallback=args["generator"])
 
         # Local Token Merging!
 
@@ -146,12 +153,14 @@ def make_diffusers_tome_block(block_class: Type[torch.nn.Module]) -> Type[torch.
 
             # 1. Self-Attention
             cross_attention_kwargs = cross_attention_kwargs if cross_attention_kwargs is not None else {}
+            # tt = time.time()
             attn_output = self.attn1(
                 norm_hidden_states,
                 encoder_hidden_states=encoder_hidden_states if self.only_cross_attention else None,
                 attention_mask=attention_mask,
                 **cross_attention_kwargs,
             )
+            # print(time.time() - tt)
             if self.use_ada_layer_norm_zero:
                 attn_output = gate_msa.unsqueeze(1) * attn_output
 
@@ -216,7 +225,7 @@ def hook_tome_module(module: torch.nn.Module):
         else:
             return None
 
-        module.generator = module.generator.manual_seed(module._tome_info["args"]["seed"])
+        # module.generator = module.generator.manual_seed(module._tome_info["args"]["seed"])
         return None
 
     module._tome_info["hooks"].append(module.register_forward_pre_hook(hook))
@@ -229,8 +238,8 @@ def apply_patch(
         global_merge_ratio=0.8,
         max_downsample: int = 2,
         seed: int = 123,
-        chunk_size: int = 4,
-        include_control: bool = True,
+        batch_size: int = 2,
+        include_control: bool = False,
         align_batch: bool = False,
         target_stride: int = 4,
         global_rand=0.5):
@@ -253,7 +262,8 @@ def apply_patch(
                                        E.g., 1 only applies to layers with no downsampling (4/15) while
                                        8 applies to all layers (15/15). I recommend a value of 1 or 2.
      - seed: Manual random seed. 
-     - batch_size: Video chunk size.
+     - batch_size: Video batch size. Number of video chunks in one pass. When processing one video, it 
+                   should be 2 (cond + uncond) or 3 (when using PnP, source + cond + uncond).
      - include_control: Whether or not to patch ControlNet model.
      - align_batch: Whether or not to align similarity matching maps of samples in the batch. It should
                     be True when using PnP as control.
@@ -292,7 +302,7 @@ def apply_patch(
                 "max_downsample": max_downsample,
                 "generator": None,
                 "seed": seed,
-                "chunk_size": chunk_size,
+                "batch_size": batch_size,
                 "align_batch": align_batch,
                 "merge_global": merge_global,
                 "global_merge_ratio": global_merge_ratio,

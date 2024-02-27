@@ -6,26 +6,17 @@ from glob import glob
 from PIL import Image, ImageSequence
 
 import torch
-from torchvision.io import read_video
+from torchvision.io import read_video, write_video
 import torchvision.transforms as T
 
 from diffusers import DDIMScheduler, StableDiffusionControlNetPipeline, StableDiffusionPipeline, StableDiffusionDepth2ImgPipeline, ControlNetModel
-
-from controlnet_utils import control_preprocess
-
-CONTROLNET_DICT = {
-    "tile": "lllyasviel/control_v11f1e_sd15_tile",
-    "ip2p": "lllyasviel/control_v11e_sd15_ip2p",
-    "openpose": "lllyasviel/control_v11p_sd15_openpose",
-    "softedge": "lllyasviel/control_v11p_sd15_softedge",
-    "depth": "lllyasviel/control_v11f1p_sd15_depth",
-    "lineart_anime": "lllyasviel/control_v11p_sd15s2_lineart_anime",
-    "canny": "lllyasviel/control_v11p_sd15_canny"
-}
+from .controlnet_utils import CONTROLNET_DICT, control_preprocess
+from einops import rearrange
 
 FRAME_EXT = [".jpg", ".png"]
 
-def init_model(device = "cuda", sd_version = "1.5", model_key = None, control_type = "none", weight_dtype = "fp16"):
+
+def init_model(device="cuda", sd_version="1.5", model_key=None, control_type="none", weight_dtype="fp16"):
 
     use_depth = False
     if model_key is None:
@@ -41,11 +32,11 @@ def init_model(device = "cuda", sd_version = "1.5", model_key = None, control_ty
         else:
             raise ValueError(
                 f'Stable-diffusion version {sd_version} not supported.')
-        
+
         print(f'[INFO] loading stable diffusion from: {model_key}')
     else:
         print(f'[INFO] loading custome model from: {model_key}')
-    
+
     scheduler = DDIMScheduler.from_pretrained(
         model_key, subfolder="scheduler")
 
@@ -69,10 +60,9 @@ def init_model(device = "cuda", sd_version = "1.5", model_key = None, control_ty
         )
     else:
         pipe = StableDiffusionPipeline.from_pretrained(
-            model_key, torch_dtype=weight_dtype
+            # model_key, torch_dtype=weight_dtype
+            model_key, torch_dtype=weight_dtype, local_files_only=True, cache_dir="/home/lixirui/.cache/huggingface/diffusers",
         )
-    
-    print(f'[INFO] loaded stable diffusion!')
 
     return pipe.to(device), scheduler, model_key
 
@@ -89,8 +79,8 @@ def load_image(image_path):
     image = T.ToTensor()(image)
     return image.unsqueeze(0)
 
+
 def process_frames(frames, h, w):
-    print(f"[INFO] processing frames")
 
     fh, fw = frames.shape[-2:]
     h = int(np.floor(h / 64.0)) * 64
@@ -106,7 +96,8 @@ def process_frames(frames, h, w):
     if len(frames.shape) == 3:
         frames = [frames]
 
-    print(f"[INFO] resize to {size} and centercrop to {(h, w)}")
+    print(
+        f"[INFO] frame size {(fh, fw)} resize to {size} and centercrop to {(h, w)}")
 
     frame_ls = []
     for frame in frames:
@@ -116,6 +107,7 @@ def process_frames(frames, h, w):
         frame_ls.append(cropped_frame)
     return torch.stack(frame_ls)
 
+
 def glob_frame_paths(video_path):
     frame_paths = []
     for ext in FRAME_EXT:
@@ -123,11 +115,13 @@ def glob_frame_paths(video_path):
     frame_paths = sorted(frame_paths)
     return frame_paths
 
-def load_video(video_path, h, w, frame_ids = None, device = "cuda"):
-    print(f"[INFO] loading video from: {video_path}")    
+
+def load_video(video_path, h, w, frame_ids=None, device="cuda"):
+    
 
     if ".mp4" in video_path:
-        frames, _, _ = read_video(video_path, output_format="TCHW", pts_unit="sec")
+        frames, _, _ = read_video(
+            video_path, output_format="TCHW", pts_unit="sec")
         frames = frames / 255
     elif ".gif" in video_path:
         frames = Image.open(video_path)
@@ -145,56 +139,81 @@ def load_video(video_path, h, w, frame_ids = None, device = "cuda"):
     if frame_ids is not None:
         frames = frames[frame_ids]
 
+    print(f"[INFO] loaded video with {len(frames)} frames from: {video_path}")
+
     frames = process_frames(frames, h, w)
     return frames.to(device)
 
-def save_frames(frames, path, ext = "png", frame_ids = None):
+
+def save_video(frames: torch.Tensor, path, frame_ids=None, save_frame=False):
+    os.makedirs(path, exist_ok=True)
+    if frame_ids is None:
+        frame_ids = [i for i in range(len(frames))]
+    frames = frames[frame_ids]
+
+    proc_frames = (rearrange(frames, "T C H W -> T H W C") * 255).to(torch.uint8).cpu()
+    write_video(os.path.join(path, "output.mp4"), proc_frames, fps = 30, video_codec="h264")
+    print(f"[INFO] save video to {os.path.join(path, 'output.mp4')}")
+
+    if save_frame:
+        save_frames(frames, os.path.join(path, "frames"), frame_ids = frame_ids)
+    
+
+def save_frames(frames: torch.Tensor, path, ext="png", frame_ids=None):
+    os.makedirs(path, exist_ok=True)
     if frame_ids is None:
         frame_ids = [i for i in range(len(frames))]
     for i, frame in zip(frame_ids, frames):
         T.ToPILImage()(frame).save(
             os.path.join(path, '{:04}.{}'.format(i, ext)))
 
-def load_latent(latent_path, t, frame_ids = None):
+
+def load_latent(latent_path, t, frame_ids=None):
     latent_fname = f'noisy_latents_{t}.pt'
-    
+
     lp = os.path.join(latent_path, latent_fname)
-    assert os.path.exists(lp), f"Latent at timestep {t} not found in {latent_path}."
-        
+    assert os.path.exists(
+        lp), f"Latent at timestep {t} not found in {latent_path}."
+
     latents = torch.load(lp)
     if frame_ids is not None:
         latents = latents[frame_ids]
+    
+    print(f"[INFO] loaded initial latent from {lp}")
 
     return latents
 
 @torch.no_grad()
 def prepare_depth(pipe, frames, frame_ids, work_dir):
-    print("[INFO] preparing depth images...")
+    
     depth_ls = []
     depth_dir = os.path.join(work_dir, "depth")
-    os.makedirs(os.path.dirname(depth_path), exist_ok=True)
+    os.makedirs(depth_dir, exist_ok=True)
     for frame, frame_id in zip(frames, frame_ids):
         depth_path = os.path.join(depth_dir, "{:04}.pt".format(frame_id))
         depth = load_depth(pipe, depth_path, frame)
         depth_ls += [depth]
-    
+    print(f"[INFO] loaded depth images from {depth_path}")
     return torch.cat(depth_ls)
 
 # From pix2video: code/file_utils.py
-def load_depth(model, depth_path, input_image, dtype = torch.float32):
+
+def load_depth(model, depth_path, input_image, dtype=torch.float32):
     if os.path.exists(depth_path):
         depth_map = torch.load(depth_path)
     else:
         input_image = T.ToPILImage()(input_image.squeeze())
-        depth_map = prepare_depth_map(model, input_image, dtype=dtype, device=model.device)
+        depth_map = prepare_depth_map(
+            model, input_image, dtype=dtype, device=model.device)
         torch.save(depth_map, depth_path)
         depth_image = (((depth_map + 1.0) / 2.0) * 255).to(torch.uint8)
-        T.ToPILImage()(depth_image.squeeze()).convert("L").save(depth_path.replace(".pt", ".png"))
+        T.ToPILImage()(depth_image.squeeze()).convert(
+            "L").save(depth_path.replace(".pt", ".png"))
 
     return depth_map
 
 @torch.no_grad()
-def prepare_depth_map(model, image, depth_map = None, batch_size = 1, do_classifier_free_guidance = False, dtype = torch.float32, device = "cuda"):
+def prepare_depth_map(model, image, depth_map=None, batch_size=1, do_classifier_free_guidance=False, dtype=torch.float32, device="cuda"):
     if isinstance(image, Image.Image):
         image = [image]
     else:
@@ -208,11 +227,13 @@ def prepare_depth_map(model, image, depth_map = None, batch_size = 1, do_classif
         height, width = image[0].shape[-2:]
 
     if depth_map is None:
-        pixel_values = model.feature_extractor(images=image, return_tensors="pt").pixel_values
+        pixel_values = model.feature_extractor(
+            images=image, return_tensors="pt").pixel_values
         pixel_values = pixel_values.to(device=device)
         # The DPT-Hybrid model uses batch-norm layers which are not compatible with fp16.
         # So we use `torch.autocast` here for half precision inference.
-        context_manger = torch.autocast("cuda", dtype=dtype) if device.type == "cuda" else contextlib.nullcontext()
+        context_manger = torch.autocast(
+            "cuda", dtype=dtype) if device.type == "cuda" else contextlib.nullcontext()
         with context_manger:
             ret = model.depth_estimator(pixel_values)
             depth_map = ret.predicted_depth
@@ -224,14 +245,14 @@ def prepare_depth_map(model, image, depth_map = None, batch_size = 1, do_classif
     bg_indices = depth_map == -1
     min_d = depth_map[indices].min()
 
-
     if bg_indices.sum() > 0:
         depth_map[bg_indices] = min_d - 10
         # min_d = min_d - 10
 
     depth_map = torch.nn.functional.interpolate(
         depth_map.unsqueeze(1),
-        size=(height // model.vae_scale_factor, width // model.vae_scale_factor),
+        size=(height // model.vae_scale_factor,
+              width // model.vae_scale_factor),
         mode="bicubic",
         align_corners=False,
     )
@@ -246,7 +267,8 @@ def prepare_depth_map(model, image, depth_map = None, batch_size = 1, do_classif
         repeat_by = batch_size // depth_map.shape[0]
         depth_map = depth_map.repeat(repeat_by, 1, 1, 1)
 
-    depth_map = torch.cat([depth_map] * 2) if do_classifier_free_guidance else depth_map
+    depth_map = torch.cat(
+        [depth_map] * 2) if do_classifier_free_guidance else depth_map
     return depth_map
 
 
@@ -254,7 +276,8 @@ def get_latents_dir(latents_path, model_key):
     model_key = model_key.split("/")[-1]
     return os.path.join(latents_path, model_key)
 
-def get_controlnet_kwargs(controlnet, x, cond, t, controlnet_cond, controlnet_scale = 1.0):
+
+def get_controlnet_kwargs(controlnet, x, cond, t, controlnet_cond, controlnet_scale=1.0):
     down_block_res_samples, mid_block_res_sample = controlnet(
         x,
         t,
@@ -267,33 +290,39 @@ def get_controlnet_kwargs(controlnet, x, cond, t, controlnet_cond, controlnet_sc
         for down_block_res_sample in down_block_res_samples
     ]
     mid_block_res_sample *= controlnet_scale
-    controlnet_kwargs = {"down_block_additional_residuals": down_block_res_samples, "mid_block_additional_residual": mid_block_res_sample}
+    controlnet_kwargs = {"down_block_additional_residuals": down_block_res_samples,
+                         "mid_block_additional_residual": mid_block_res_sample}
     return controlnet_kwargs
 
-def get_frame_ids(frame_range, frame_ids = None):
+
+def get_frame_ids(frame_range, frame_ids=None):
     if frame_ids is None:
         frame_ids = list(range(*frame_range))
     frame_ids = sorted(frame_ids)
 
     if len(frame_ids) > 4:
-        frame_ids_str = " ".join(frame_ids[:2]) + " ... " + " ".join(frame_ids[-2:])
+        frame_ids_str = "{} {} ... {} {}".format(
+            *frame_ids[:2], *frame_ids[-2:])
     else:
-        frame_ids_str = " ".join(frame_ids)
-    print("[INFO] Frame indexes: ",frame_ids_str)
+        frame_ids_str = " ".join(["{}"] * len(frame_ids)).format(*frame_ids)
+    print("[INFO] frame indexes: ", frame_ids_str)
     return frame_ids
 
+
 def prepare_control(control, frames, frame_ids, save_path):
-    if control in ["none", "pnp"]:
+    if control not in CONTROLNET_DICT.keys():
+        print(f"[WARNING] unknown controlnet type {control}")
         return None
 
     control_subdir = f'{save_path}/{control}_image'
 
     preprocess_flag = True
     if os.path.exists(control_subdir):
-        print(f"Load control image from {control_subdir}.")
+        print(f"[INFO] load control image from {control_subdir}.")
         control_image_ls = []
         for frame_id in frame_ids:
-            image_path = os.path.join(control_subdir, "{:04}.pt".format(frame_id))
+            image_path = os.path.join(
+                control_subdir, "{:04}_control.png".format(frame_id))
             if not os.path.exists(image_path):
                 break
             control_image_ls += [load_image(image_path)]
@@ -302,12 +331,13 @@ def prepare_control(control, frames, frame_ids, save_path):
             control_images = torch.cat(control_image_ls)
 
     if preprocess_flag:
-        print("[INFO] Preprocessing control images...")
+        print("[INFO] preprocessing control images...")
         control_images = control_preprocess(frames, control)
-        print(f"[INFO] Save control images to {control_subdir}.")
-        os.makedirs(control_subdir, exist_ok = True)
+        print(f"[INFO] save control images to {control_subdir}.")
+        os.makedirs(control_subdir, exist_ok=True)
         for image, frame_id in zip(control_images, frame_ids):
-            image_path = os.path.join(control_subdir, "{:04}.pt".format(frame_id))
-            T.ToPILImage(image).save(image_path)
+            image_path = os.path.join(
+                control_subdir, "{:04}.png".format(frame_id))
+            T.ToPILImage()(image).save(image_path)
 
     return control_images

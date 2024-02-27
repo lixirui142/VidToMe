@@ -9,3 +9,58 @@
 https://github.com/lixirui142/VidToMe/assets/46120552/d44b086f-e566-41c6-a83a-c154a68a3307
 
 > **Abstract:** *Diffusion models have made significant advances in generating high-quality images, but their application to video generation has remained challenging due to the complexity of temporal motion. Zero-shot video editing offers a solution by utilizing pre-trained image diffusion models to translate source videos into new ones. Nevertheless, existing methods struggle to maintain strict temporal consistency and efficient memory consumption. In this work, we propose a novel approach to enhance temporal consistency in generated videos by merging self-attention tokens across frames. By aligning and compressing temporally redundant tokens across frames, our method improves temporal coherence and reduces memory consumption in self-attention computations. The merging strategy matches and aligns tokens according to the temporal correspondence between frames, facilitating natural temporal consistency in generated video frames. To manage the complexity of video processing, we divide videos into chunks and develop intra-chunk local token merging and inter-chunk global token merging, ensuring both short-term video continuity and long-term content consistency. Our video editing approach seamlessly extends the advancements in image editing to video editing, rendering favorable results in temporal consistency over state-of-the-art methods.*
+
+
+## Updates
+- [02/2023] Code is released.
+- [02/2024] Accepted to CVPR 2024!
+- [12/2023] Release paper and website.
+
+### TODO
+- [ ] Release evaluation dataset and more examples.
+- [ ] Release evaluation code.
+
+## Setup
+
+1. Clone the repository. 
+
+```shell
+git clone git@github.com:lixirui142/VidToMe.git
+cd VidToMe
+```
+
+2. Create a new conda environment and install PyTorch following [**PyTorch Official Site**](https://pytorch.org/get-started/locally/). Then pip install required packages.
+
+```shell
+conda create -n vidtome python=3.9
+conda activate vidtome
+# Install torch, torchvision (https://pytorch.org/get-started/locally/)
+pip install -r requirements.txt
+```
+
+## Run
+
+```shell
+python run_vidtome.py --config configs/tea-pour.yaml
+```
+
+Check more config examples in ['configs'](configs). The default config value are specified in ['default.yaml'](configs/default.yaml) with explanation.
+
+## Citation
+
+If you find this work useful for your research, please consider citing our paper:
+
+```bibtex
+
+@inproceedings{li2023vidtome,
+    title={VidToMe: Video Token Merging for Zero-Shot Video Editing},
+    author={Li, Xirui and Ma, Chao and Yang, Xiaokang and Yang, Ming-Hsuan},
+    booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+    year={2024}
+    }
+
+```
+
+## Acknowledgments
+
+The code is mainly developed based on [ToMeSD](https://github.com/dbolya/tomesd), [PnP](https://github.com/MichalGeyer/plug-and-play), [Diffusers](https://github.com/huggingface/diffusers).

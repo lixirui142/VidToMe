@@ -1,15 +1,18 @@
-import torchvision.transforms as T
 import torch.nn as nn
 import torch
 import numpy as np
 from tqdm import tqdm
 import os
 from transformers import logging
-from utils import load_config
-from utils import get_controlnet_kwargs, get_frame_ids, get_latents_dir, init_model, prepare_control, load_latent, load_video, prepare_depth, save_frames, seed_everything, load_depth, control_preprocess
-from utils import register_time, register_attention_control_efficient, register_conv_control_efficient
+
+from utils import CONTROLNET_DICT
+from utils import load_config, save_config
+from utils import get_controlnet_kwargs, get_frame_ids, get_latents_dir, init_model, seed_everything
+from utils import prepare_control, load_latent, load_video, prepare_depth, save_video
+from utils import register_time, register_attention_control, register_conv_control
 
 import vidtome
+
 # suppress partial model loading warning
 logging.set_verbosity_error()
 
@@ -19,18 +22,22 @@ class Generator(nn.Module):
         super().__init__()
 
         self.device = config.device
-        if config.mixed_precision == "fp16":
-            self.dtype = torch.float16
-            print("Mixed precision fp16. Use torch.float16.")
-        else:
-            self.dtype = torch.float32
-            print("No mixed precision. Use torch.float32.")
+        self.seed = config.seed
 
-        self.use_depth = config.sd_version == "depth"
+
+
+        
         self.model_key = config.model_key
 
         self.config = config
         gene_config = config.generation
+        float_precision = gene_config.float_precision if "float_precision" in gene_config else config.float_precision
+        if float_precision == "fp16":
+            self.dtype = torch.float16
+            print("[INFO] float precision fp16. Use torch.float16.")
+        else:
+            self.dtype = torch.float32
+            print("[INFO] float precision fp32. Use torch.float32.")
 
         self.pipe = pipe
         self.vae = pipe.vae
@@ -39,16 +46,22 @@ class Generator(nn.Module):
         self.text_encoder = pipe.text_encoder
         if config.enable_xformers_memory_efficient_attention:
             pipe.enable_xformers_memory_efficient_attention()
+        self.n_timesteps = gene_config.n_timesteps
+        scheduler.set_timesteps(gene_config.n_timesteps, device=self.device)
+        self.scheduler = scheduler
 
+        self.batch_size = 2
         self.control = gene_config.control
-        if self.control not in ["none", "pnp"]:
-            self.use_controlnet = True
+        self.use_depth = config.sd_version == "depth"
+        self.use_controlnet = self.control in CONTROLNET_DICT.keys()
+        self.use_pnp = self.control == "pnp"
+        if self.use_controlnet:
             self.controlnet = pipe.controlnet
             self.controlnet_scale = gene_config.control_scale
-        elif self.control == "pnp":
-            self.use_pnp = True
+        elif self.use_pnp:
             pnp_f_t = int(gene_config.n_timesteps * gene_config.pnp_f_t)
             pnp_attn_t = int(gene_config.n_timesteps * gene_config.pnp_attn_t)
+            self.batch_size += 1
             self.init_pnp(conv_injection_t=pnp_f_t, qk_injection_t=pnp_attn_t)
 
         self.chunk_size = gene_config.chunk_size
@@ -57,31 +70,38 @@ class Generator(nn.Module):
         self.local_merge_ratio = gene_config.local_merge_ratio
         self.global_merge_ratio = gene_config.global_merge_ratio
         self.global_rand = gene_config.global_rand
-
-        scheduler.set_timesteps(gene_config.n_timesteps, device=self.device)
-        self.scheduler = scheduler
+        self.align_batch = gene_config.align_batch
 
         self.prompt = gene_config.prompt
         self.negative_prompt = gene_config.negative_prompt
         self.guidance_scale = gene_config.guidance_scale
+        self.save_frame = gene_config.save_frame
 
         self.frame_height, self.frame_width = config.height, config.width
         self.work_dir = config.work_dir
 
         self.chunk_ord = gene_config.chunk_ord
         if "mix" in self.chunk_ord:
-            self.chunk_ord = "mix"
             self.perm_div = float(self.chunk_ord.split("-")[-1]) if "-" in self.chunk_ord else 3.
-            
+            self.chunk_ord = "mix"
+        # Patch VidToMe to model
+        self.activate_vidtome()
+
+        if gene_config.use_lora:
+            self.pipe.load_lora_weights(**gene_config.lora)
+    
+    def activate_vidtome(self):
+        vidtome.apply_patch(self.pipe, self.local_merge_ratio, self.merge_global, self.global_merge_ratio, 
+            seed = self.seed, batch_size = self.batch_size, align_batch = self.use_pnp or self.align_batch, global_rand = self.global_rand)        
 
     @torch.no_grad()
-    def get_text_embeds_input(self, prompt, negative_prompt, chunk_size, pnp=False):
+    def get_text_embeds_input(self, prompt, negative_prompt):
         text_embeds = self.get_text_embeds(
             prompt, negative_prompt, self.device)
-        if pnp:
+        if self.use_pnp:
             pnp_guidance_embeds = self.get_text_embeds("", device=self.device)
             text_embeds = torch.cat(
-                [pnp_guidance_embeds, self.text_embeds], dim=0)
+                [pnp_guidance_embeds, text_embeds], dim=0)
         return text_embeds
 
     @torch.no_grad()
@@ -101,13 +121,16 @@ class Generator(nn.Module):
     def prepare_data(self, data_path, latent_path, frame_ids):
         self.frames = load_video(data_path, self.frame_height,
                                  self.frame_width, frame_ids=frame_ids, device=self.device)
+        self.init_noise = load_latent(
+            latent_path, t=self.scheduler.timesteps[0], frame_ids=frame_ids).to(self.dtype).to(self.device)
+
         if self.use_depth:
             self.depths = prepare_depth(
-                self.pipe, self.frames, frame_ids, self.work_dir)
-        self.init_noise = load_latent(
-            latent_path, t=self.scheduler.timesteps[0], frame_ids=frame_ids)
-        self.controlnet_images = prepare_control(
-            self.control, self.frames, frame_ids, self.work_dir)
+                self.pipe, self.frames, frame_ids, self.work_dir).to(self.init_noise)
+
+        if self.use_controlnet:
+            self.controlnet_images = prepare_control(
+                self.control, self.frames, frame_ids, self.work_dir).to(self.init_noise)
 
     @torch.no_grad()
     def decode_latents(self, latents):
@@ -149,45 +172,49 @@ class Generator(nn.Module):
         # The first chunk has a random length
         rand_first = np.random.randint(0, self.chunk_size) + 1
         chunks = x_index[rand_first:].split(self.chunk_size, dim=0)
-        chunks = torch.cat([x_index[:rand_first], chunks], dim=0)
+        chunks = [x_index[:rand_first]] + list(chunks)
         if np.random.rand() > 0.5:
             chunks = chunks[::-1]
         
+        # Chunk order only matter when we do global token merging
+        if self.merge_global == False:
+            return chunks
+
         # Chunk order. "seq": sequential order. "rand": full permutation. "mix": partial permutation.
         if self.chunk_ord == "rand":
-            ord = torch.randperm(len(chunks))
+            order = torch.randperm(len(chunks))
         elif self.chunk_ord == "mix":
             randord = torch.randperm(len(chunks)).tolist()
-            rand_len = int(len(randord) / self.permdiv)
+            rand_len = int(len(randord) / self.perm_div)
             seqord = sorted(randord[rand_len:])
             randord = randord[:rand_len]
             if abs(seqord[-1] - randord[-1]) < abs(seqord[0] - randord[-1]):
                 seqord = seqord[::-1]
-            ord = randord + seqord
+            order = randord + seqord
         else:
-            ord = torch.arange(len(chunks))
-        chunks = chunks[ord]
+            order = torch.arange(len(chunks))
+        chunks = [chunks[i] for i in order]
         return chunks
 
     @torch.no_grad()
     def ddim_sample(self, x, conds):
         print("[INFO] denoising frames...")
         timesteps = self.scheduler.timesteps
-        with torch.autocast(device_type=self.device, dtype=self.dtype):
-            for i, t in enumerate(tqdm(timesteps, desc="Sampling")):
-                self.pre_iter(x, t)
+        noises = torch.zeros_like(x)
 
-                # Split video into chunks and denoise them
-                noises = []
-                chunks = self.get_chunks(len(x))
-                for chunk in chunks:
-                    noise = self.pred_noise(
-                        x[chunk], conds[chunk], t, batch_idx=chunk)
-                    noises += [noise]
-                noises = torch.cat(noises)
-                x = self.pred_next_x(x, noises, t, i, inversion=False)
+        for i, t in enumerate(tqdm(timesteps, desc="Sampling")):
+            self.pre_iter(x, t)
 
-                self.post_iter(x, t)
+            # Split video into chunks and denoise
+            chunks = self.get_chunks(len(x))
+            for chunk in chunks:
+                torch.cuda.empty_cache()
+                noises[chunk] = self.pred_noise(
+                    x[chunk], conds, t, batch_idx=chunk)
+
+            x = self.pred_next_x(x, noises, t, i, inversion=False)
+
+            self.post_iter(x, t)
         return x
 
     def pre_iter(self, x, t):
@@ -225,16 +252,16 @@ class Generator(nn.Module):
             depth = self.depths
             if batch_idx is not None:
                 depth = depth[batch_idx]
-            depth = depth.repeat(len(latent_model_input), 1, 1, 1)
+            depth = depth.repeat(batch_size, 1, 1, 1)
             latent_model_input = torch.cat([latent_model_input, depth.to(x)], dim=1)
         
         kwargs = dict()
         # Compute controlnet outputs
         if self.use_controlnet:
             controlnet_cond = self.controlnet_images
-            if batch_idx is None:
+            if batch_idx is not None:
                 controlnet_cond = controlnet_cond[batch_idx]
-            controlnet_cond = controlnet_cond.repeat(len(latent_model_input), 1, 1, 1)
+            controlnet_cond = controlnet_cond.repeat(batch_size, 1, 1, 1)
             controlnet_kwargs = get_controlnet_kwargs(
                 self.controlnet, latent_model_input, text_embed_input, t, controlnet_cond, self.controlnet_scale)
             kwargs.update(controlnet_kwargs)
@@ -278,12 +305,12 @@ class Generator(nn.Module):
         return x
 
     def init_pnp(self, conv_injection_t, qk_injection_t):
-        self.qk_injection_timesteps = self.scheduler.timesteps[:qk_injection_t] if qk_injection_t >= 0 else []
-        self.conv_injection_timesteps = self.scheduler.timesteps[:conv_injection_t] if conv_injection_t >= 0 else []
-        register_attention_control_efficient(
-            self, self.qk_injection_timesteps, num_inputs=self.batch_size)
-        register_conv_control_efficient(
-            self, self.conv_injection_timesteps, num_inputs=self.batch_size)
+        qk_injection_timesteps = self.scheduler.timesteps[:qk_injection_t] if qk_injection_t >= 0 else []
+        conv_injection_timesteps = self.scheduler.timesteps[:conv_injection_t] if conv_injection_t >= 0 else []
+        register_attention_control(
+            self, qk_injection_timesteps, num_inputs=self.batch_size)
+        register_conv_control(
+            self, conv_injection_timesteps, num_inputs=self.batch_size)
 
     def check_latent_exists(self, latent_path):
         if self.use_pnp:
@@ -292,16 +319,15 @@ class Generator(nn.Module):
             timesteps = [self.scheduler.timesteps[0]]
 
         for ts in timesteps:
-            latent_path = os.path.join(
+            cur_latent_path = os.path.join(
                 latent_path, f'noisy_latents_{ts}.pt')
-            if not os.path.exists(latent_path):
+            if not os.path.exists(cur_latent_path):
                 return False
         return True
 
     @torch.no_grad()
     def __call__(self, data_path, latent_path, output_path, frame_ids):
-        self.scheduler.set_timesteps(self.steps)
-
+        self.scheduler.set_timesteps(self.n_timesteps)
         latent_path = get_latents_dir(latent_path, self.model_key)
         assert self.check_latent_exists(
             latent_path), f"Required latent not found at {latent_path}. \
@@ -313,15 +339,19 @@ class Generator(nn.Module):
         self.frame_ids = frame_ids
         self.prepare_data(data_path, latent_path, frame_ids)
 
-        latents = self.init_noise
-        print(f"[INFO] initial noise latent shape: {latents.shape}")
+        print(f"[INFO] initial noise latent shape: {self.init_noise.shape}")
 
         for edit_name, edit_prompt in self.prompt.items():
-            conds = self.get_text_embeds_input(edit_prompt, self.negative_prompt, self.chunk_size, self.use_pnp)
-            clean_latent = self.ddim_sample(latents, conds)
+            print(f"[INFO] current prompt: {edit_prompt}")
+            conds = self.get_text_embeds_input(edit_prompt, self.negative_prompt)
+            # Comment this if you have enough GPU memory
+            clean_latent = self.ddim_sample(self.init_noise, conds)
+            torch.cuda.empty_cache()
             clean_frames = self.decode_latents_batch(clean_latent)
             cur_output_path = os.path.join(output_path, edit_name)
-            save_frames(clean_frames, cur_output_path, frame_ids = frame_ids)
+            save_config(self.config, cur_output_path, gene = True)
+            save_video(clean_frames, cur_output_path, save_frame = self.save_frame)
+
 
         
 
@@ -329,11 +359,11 @@ class Generator(nn.Module):
 if __name__ == "__main__":
     config = load_config()
     pipe, scheduler, model_key = init_model(
-        config.device, config.sd_version, config.model_key, config.inversion.control, config.weight_dtype)
+        config.device, config.sd_version, config.model_key, config.generation.control, config.float_precision)
     config.model_key = model_key
     seed_everything(config.seed)
     generator = Generator(pipe, scheduler, config)
     frame_ids = get_frame_ids(
         config.generation.frame_range, config.generation.frame_ids)
-    generator(config.input_path, config.latents_path,
+    generator(config.input_path, config.generation.latents_path,
               config.generation.output_path, frame_ids=frame_ids)
