@@ -10,9 +10,9 @@ latents*/
 tmp/
 *.zip
 *.gif
-
+assets/
 *.json
 *.csv
 *.safetensors
 outputs/
-_*
+_test*
