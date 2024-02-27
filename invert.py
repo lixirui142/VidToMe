@@ -37,7 +37,10 @@ class Inverter(nn.Module):
         self.unet = pipe.unet
         self.text_encoder = pipe.text_encoder
         if config.enable_xformers_memory_efficient_attention:
-            pipe.enable_xformers_memory_efficient_attention()
+            try:
+                pipe.enable_xformers_memory_efficient_attention()
+            except ModuleNotFoundError:
+                print("[WARNING] xformers not found. Disable xformers attention.")
 
         self.control = inv_config.control
         if self.control != "none":
