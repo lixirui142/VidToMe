@@ -179,7 +179,7 @@ def load_latent(latent_path, t, frame_ids=None):
     if frame_ids is not None:
         latents = latents[frame_ids]
     
-    print(f"[INFO] loaded initial latent from {lp}")
+    # print(f"[INFO] loaded initial latent from {lp}")
 
     return latents
 

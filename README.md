@@ -1,4 +1,4 @@
-## VidToMe: Video Token Merging for Zero-Shot Video Editing (CVPR 2024)
+## VidToMe: Video Token Merging for Zero-Shot Video Editing (CVPR 2024)<br><sub>Official Pytorch Implementation</sub>
 
 [Xirui Li](https://github.com/lixirui142), [Chao Ma](https://vision.sjtu.edu.cn/), [Xiaokang Yang](https://english.seiee.sjtu.edu.cn/english/detail/842_802.htm), and [Ming-Hsuan Yang](https://faculty.ucmerced.edu/mhyang/)<br>
 
