@@ -4,7 +4,7 @@
 
 [**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Summary Video**](https://youtu.be/cZPtwcRepNY)
 
-https://github.com/lixirui142/VidToMe/assets/46120552/cbcea695-8723-459c-8b54-4c6b6136c347
+https://github.com/lixirui142/VidToMe/assets/46120552/e1492b83-eb3c-440b-a47d-330995284e14
 
 <details><summary> Abstract </summary>
 
