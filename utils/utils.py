@@ -61,7 +61,7 @@ def init_model(device="cuda", sd_version="1.5", model_key=None, control_type="no
     else:
         pipe = StableDiffusionPipeline.from_pretrained(
             # model_key, torch_dtype=weight_dtype
-            model_key, torch_dtype=weight_dtype, local_files_only=True, cache_dir="/home/lixirui/.cache/huggingface/diffusers",
+            model_key, torch_dtype=weight_dtype,
         )
 
     return pipe.to(device), scheduler, model_key
