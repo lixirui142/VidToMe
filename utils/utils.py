@@ -322,7 +322,7 @@ def prepare_control(control, frames, frame_ids, save_path):
         control_image_ls = []
         for frame_id in frame_ids:
             image_path = os.path.join(
-                control_subdir, "{:04}_control.png".format(frame_id))
+                control_subdir, "{:04}.png".format(frame_id))
             if not os.path.exists(image_path):
                 break
             control_image_ls += [load_image(image_path)]
