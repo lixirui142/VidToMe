@@ -1,5 +1,5 @@
 controlnet_aux==0.0.6
-diffusers==0.19.3
+diffusers
 transformers==4.30.2
 scipy==1.9.1
 einops

@@ -44,7 +44,7 @@ def register_attention_control(model, injection_schedule, num_inputs):
         else:
             to_out = self.to_out
 
-        def forward(x, encoder_hidden_states=None, attention_mask=None):
+        def forward(x, encoder_hidden_states=None, attention_mask=None, **kwargs):
             batch_size, sequence_length, dim = x.shape
             h = self.heads
 
@@ -107,7 +107,7 @@ def register_attention_control(model, injection_schedule, num_inputs):
 
 def register_conv_control(model, injection_schedule, num_inputs):
     def conv_forward(self):
-        def forward(input_tensor, temb):
+        def forward(input_tensor, temb, **kwargs):
             hidden_states = input_tensor
 
             hidden_states = self.norm1(hidden_states)
