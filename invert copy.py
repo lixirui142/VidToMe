@@ -119,22 +119,22 @@ class Inverter(nn.Module):
         print("[INFO] start DDIM Inversion!")
         timesteps = reversed(self.scheduler.timesteps)
         with torch.autocast(device_type=self.device, dtype=self.dtype):
-            for i, t in enumerate(tqdm(timesteps)):
+            for i, t in enumerate(tqdm(timesteps[:-1])):
                 noises = []
                 x_index = torch.arange(len(x))
                 batches = x_index.split(self.batch_size, dim = 0)
                 for batch in batches:
                     noise = self.pred_noise(
-                        x[batch], conds[batch], timesteps[i], batch_idx=batch)
+                        x[batch], conds[batch], t, batch_idx=batch)
                     noises += [noise]
                 noises = torch.cat(noises)
                 x = self.pred_next_x(x, noises, t, i, inversion=True)
                 if self.save_latents and t in self.timesteps_to_save:
                     torch.save(x, os.path.join(
-                        save_path, f'noisy_latents_{t}.pt'))
+                        save_path, f'noisy_latents_{timesteps[i + 1]}.pt'))
 
         # Save inverted noise latents
-        pth = os.path.join(save_path, f'noisy_latents_{t}.pt')
+        pth = os.path.join(save_path, f'noisy_latents_{timesteps[i + 1]}.pt')
         torch.save(x, pth)
         print(f"[INFO] inverted latent saved to: {pth}")
         return x
@@ -187,8 +187,9 @@ class Inverter(nn.Module):
         alpha_prod_t = self.scheduler.alphas_cumprod[t]
         if inversion:
             alpha_prod_t_prev = (
-                self.scheduler.alphas_cumprod[timesteps[i - 1]]
-                if i > 0 else self.scheduler.final_alpha_cumprod
+                self.scheduler.alphas_cumprod[timesteps[i + 1]]
+                if i < len(timesteps) - 1
+                else self.scheduler.alphas_cumprod[timesteps[i]]
             )
         else:
             alpha_prod_t_prev = (
@@ -201,12 +202,12 @@ class Inverter(nn.Module):
         mu_prev = alpha_prod_t_prev ** 0.5
         sigma_prev = (1 - alpha_prod_t_prev) ** 0.5
 
-        if inversion:
-            pred_x0 = (x - sigma_prev * eps) / mu_prev
-            x = mu * pred_x0 + sigma * eps
-        else:
-            pred_x0 = (x - sigma * eps) / mu
-            x = mu_prev * pred_x0 + sigma_prev * eps
+        # if inversion:
+        #     pred_x0 = (x - sigma_prev * eps) / mu_prev
+        #     x = mu * pred_x0 + sigma * eps
+        # else:
+        pred_x0 = (x - sigma * eps) / mu
+        x = mu_prev * pred_x0 + sigma_prev * eps
 
         return x
 
