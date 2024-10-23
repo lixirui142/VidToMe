@@ -2,7 +2,7 @@
 
 [Xirui Li](https://github.com/lixirui142), [Chao Ma](https://vision.sjtu.edu.cn/), [Xiaokang Yang](https://english.seiee.sjtu.edu.cn/english/detail/842_802.htm), and [Ming-Hsuan Yang](https://faculty.ucmerced.edu/mhyang/)<br>
 
-[**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Summary Video**](https://youtu.be/cZPtwcRepNY)
+[**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Summary Video**](https://youtu.be/cZPtwcRepNY) | [**Model Card 🤗**](https://huggingface.co/jadechoghari/VidToMe)
 
 Also check [VISION-SJTU/VidToMe](https://github.com/VISION-SJTU/VidToMe/)
 
@@ -16,6 +16,7 @@ VidToMe merges similar self-attention tokens across frames, improving temporal c
 </details>
 
 ## Updates
+- [10/2024] Diffusers Implementation 🧨 by [@jadechoghari](https://github.com/jadechoghari) HF 🤗.
 - [02/2024] Code is released.
 - [02/2024] Accepted to CVPR 2024!
 - [12/2023] Release paper and website.
@@ -23,6 +24,9 @@ VidToMe merges similar self-attention tokens across frames, improving temporal c
 ### TODO
 - [ ] Release evaluation dataset and more examples.
 - [ ] Release evaluation code.
+
+## Diffusers Implementation - easy set up
+[![VidToMe](https://img.shields.io/badge/%F0%9F%A4%97%20VidToMe-blue)](https://huggingface.co/jadechoghari/VidToMe)
 
 ## Setup
 
