@@ -1,6 +1,6 @@
 ## VidToMe: Video Token Merging for Zero-Shot Video Editing (CVPR 2024)<br><sub>Official Pytorch Implementation</sub>
 
-[Xirui Li](https://github.com/lixirui142), [Chao Ma](https://vision.sjtu.edu.cn/), [Xiaokang Yang](https://english.seiee.sjtu.edu.cn/english/detail/842_802.htm), and [Ming-Hsuan Yang](https://faculty.ucmerced.edu/mhyang/)<br>
+[Xirui Li](https://lixirui142.github.io/), [Chao Ma](https://vision.sjtu.edu.cn/), [Xiaokang Yang](https://english.seiee.sjtu.edu.cn/english/detail/842_802.htm), and [Ming-Hsuan Yang](https://faculty.ucmerced.edu/mhyang/)<br>
 
 [**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Summary Video**](https://youtu.be/cZPtwcRepNY) | [**Model Card 🤗**](https://huggingface.co/jadechoghari/VidToMe)
 
