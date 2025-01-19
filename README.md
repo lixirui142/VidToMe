@@ -2,7 +2,7 @@
 
 [Xirui Li](https://lixirui142.github.io/), [Chao Ma](https://vision.sjtu.edu.cn/), [Xiaokang Yang](https://english.seiee.sjtu.edu.cn/english/detail/842_802.htm), and [Ming-Hsuan Yang](https://faculty.ucmerced.edu/mhyang/)<br>
 
-[**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Summary Video**](https://youtu.be/cZPtwcRepNY) | [**Model Card 🤗**](https://huggingface.co/jadechoghari/VidToMe)
+[**Project Page**](https://vidtome-diffusion.github.io/) | [**Paper**](https://arxiv.org/abs/2312.10656) | [**Summary Video**](https://youtu.be/cZPtwcRepNY) | [**Model Card 🤗**](https://huggingface.co/jadechoghari/VidToMe) | [<img src="https://api.gitsponsors.com/api/badge/img?id=732911962" height="20">](https://api.gitsponsors.com/api/badge/link?p=oxIyVN7mIZMOkF8iR1hjWy16Qu4cg3PqC4NuAJzXibxqsORqRVMoR+UUsBXKzjOe+SbwWFYeuzVG6v3PDzHtZrgfBpkXhy4tAgJNc+hDlreQ4zISeeaEefKZu59MaXodvCfsBTCHaltv7fEC4DAoGw==)
 
 Also check [VISION-SJTU/VidToMe](https://github.com/VISION-SJTU/VidToMe/)
 
